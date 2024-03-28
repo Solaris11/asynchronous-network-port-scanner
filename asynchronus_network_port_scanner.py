@@ -1,38 +1,37 @@
 import asyncio
 import ipaddress
-
+from concurrent.futures import FIRST_COMPLETED
 
 async def check_port(ip, port):
-    conn = asyncio.open_connection(str(ip), port)
     try:
+        conn = asyncio.open_connection(str(ip), port)
         reader, writer = await asyncio.wait_for(conn, timeout=3)
         writer.close()
-        return True
+        return port
     except:
-        return False
-
+        return None
 
 async def scan_ip(ip, ports):
     open_ports = []
     for port in ports:
-        if await check_port(ip, port):
-            open_ports.append(port)
-    return (str(ip), open_ports)
-
+        result = await check_port(ip, port)
+        if result:
+            open_ports.append(result)
+    return ip, open_ports
 
 async def scan_network(network, ports):
-    loop = asyncio.get_event_loop()
     network = ipaddress.IPv4Network(network)
-    tasks = [loop.create_task(scan_ip(ip, ports)) for ip in network]
-    completed, pending = await asyncio.wait(tasks, timeout=5, return_when=asyncio.ALL_COMPLETED)
-
-    for task in completed:
-        ip, open_ports = task.result()
-        if open_ports:
-            print(f'{ip}: {open_ports}')
-        else:
-            print(f'{ip} has no open ports or is not responding.')
-
+    tasks = {asyncio.create_task(scan_ip(ip, ports)): ip for ip in network}
+    while tasks:
+        done, _ = await asyncio.wait(tasks, timeout=5, return_when=FIRST_COMPLETED)
+        for task in done:
+            ip, open_ports = task.result()
+            if open_ports:
+                print(f'{ip} open ports: {open_ports}')
+            else:
+                print(f'{ip} has no open ports or is not responding.')
+            # Remove the task from the dictionary
+            del tasks[task]
 
 if __name__ == '__main__':
     network_range = '192.168.1.0/24'  # Network range to scan
